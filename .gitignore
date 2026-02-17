@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Swift Playground / SwiftPM
+.swiftpm/xcode/xcuserdata/
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+DerivedData/
+build/
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
