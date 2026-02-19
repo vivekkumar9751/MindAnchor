@@ -6,8 +6,13 @@ struct AnchorView: View {
     let intent: Intent
     
     @State private var showInterruption = false
-    @State private var vigilant = true // Simulated Focus Mode state
+    @State private var vigilant = true
     @State private var breathing = false
+    @AppStorage("focusPhilosophy") private var philosophyRaw: String = AnchorPhilosophy.undecided.rawValue
+    
+    private var philosophy: AnchorPhilosophy {
+        AnchorPhilosophy(rawValue: philosophyRaw) ?? .undecided
+    }
     
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1.0)) { context in
@@ -29,7 +34,7 @@ struct AnchorView: View {
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                         }
-                        .foregroundColor(.blue)
+                        .foregroundColor(philosophy.accentColor)
                     }
                 }
                 .padding()
@@ -40,26 +45,24 @@ struct AnchorView: View {
                 
                 // Focus Timer Visualization
                 ZStack {
-                    // Breathing Background
-                    if vigilant {
-                        Circle()
-                            .fill(Color.blue.opacity(0.1))
-                            .scaleEffect(breathing ? 1.1 : 0.9)
-                            .opacity(breathing ? 0.6 : 0.2)
-                            .animation(.easeInOut(duration: 4).repeatForever(autoreverses: true), value: breathing)
-                            .onAppear { breathing = true }
-                            .accessibilityHidden(true) // Decorative
-                    }
+                    // Philosophy-specific ambient animation
+                    PhilosophyVisualizationView(
+                        style: philosophy.visualizationStyle,
+                        accentColor: philosophy.accentColor,
+                        progress: Double(progress(at: context.date))
+                    )
+                    .frame(width: 220, height: 220)
+                    .accessibilityHidden(true)
                     
                     Circle()
                         .stroke(lineWidth: 15)
                         .opacity(0.1)
-                        .foregroundColor(.blue)
+                        .foregroundColor(philosophy.accentColor)
                     
                     Circle()
                         .trim(from: 0.0, to: progress(at: context.date))
                         .stroke(style: StrokeStyle(lineWidth: 15, lineCap: .round, lineJoin: .round))
-                        .foregroundColor(progress(at: context.date) > 1.0 ? .red : .blue)
+                        .foregroundColor(progress(at: context.date) > 1.0 ? .red : philosophy.accentColor)
                         .rotationEffect(Angle(degrees: 270.0))
                         .animation(.linear, value: progress(at: context.date))
                     
@@ -153,7 +156,7 @@ struct AnchorView: View {
     
     func timerString(at date: Date) -> String {
         let elapsed = date.timeIntervalSince(intent.createdAt)
-        let duration = intent.estimatedDuration ?? 1800 // Default 30 min
+        let duration = intent.estimatedDuration ?? 1800
         let remaining = max(0, duration - elapsed)
         
         let minutes = Int(remaining) / 60

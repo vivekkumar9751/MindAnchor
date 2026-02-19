@@ -4,12 +4,15 @@ struct LaunchView: View {
     var onStartCapture: () -> Void
     var namespace: Namespace.ID?
     @State private var showAbout = false
-    @AppStorage("focusPhilosophy") private var focusPhilosophy: String = "Mindful"
+    @State private var showSettings = false
+    @AppStorage("focusPhilosophy") private var philosophyRaw: String = AnchorPhilosophy.undecided.rawValue
     @AppStorage("hasOnboarded") private var hasOnboarded: Bool = false
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var pulse: Bool = false
     
-    let philosophies = ["Mindful", "Deep Work", "Flow"]
+    private var selectedPhilosophy: AnchorPhilosophy {
+        AnchorPhilosophy(rawValue: philosophyRaw) ?? .undecided
+    }
     
     var body: some View {
         ZStack {
@@ -25,48 +28,102 @@ struct LaunchView: View {
         }
     }
     
+    // MARK: - Onboarding (Soft, No Pressure)
+    
     var onboardingView: some View {
-        VStack(spacing: 30) {
+        VStack(spacing: 0) {
             Spacer()
+
+            // Title
+            VStack(spacing: 10) {
+                Image(systemName: "anchor")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundColor(.primary)
+                    .padding(.bottom, 8)
+                
+                Text("Welcome to MindAnchor")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                
+                Text("What feels right for you today?")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.bottom, 40)
             
-            Text("Welcome to MindAnchor")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            
-            Text("Choose your focus philosophy:")
-                .font(.headline)
-                .foregroundColor(.secondary)
-            
-            ForEach(philosophies, id: \.self) { philosophy in
-                Button(action: {
-                    focusPhilosophy = philosophy
-                    withAnimation {
-                        hasOnboarded = true
+            // Philosophy Options
+            VStack(spacing: 14) {
+                ForEach(AnchorPhilosophy.allCases) { philosophy in
+                    PhilosophyOptionCard(
+                        philosophy: philosophy,
+                        isSelected: philosophyRaw == philosophy.rawValue
+                    ) {
+                        philosophyRaw = philosophy.rawValue
+                        HapticManager.shared.playImpact(style: .light)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                                hasOnboarded = true
+                            }
+                        }
                     }
-                }) {
-                    Text(philosophy)
-                        .font(.title3)
-                        .fontWeight(.medium)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(12)
                 }
             }
-            .padding(.horizontal, 40)
+            .padding(.horizontal, 28)
             
             Spacer()
+            
+            // Skip prompt
+            Button(action: {
+                philosophyRaw = AnchorPhilosophy.undecided.rawValue
+                withAnimation(.spring(response: 0.5)) {
+                    hasOnboarded = true
+                }
+            }) {
+                Text("Skip for now")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .underline()
+            }
+            .padding(.bottom, 32)
         }
+        .transition(.opacity.combined(with: .scale(scale: 0.97)))
     }
+    
+    // MARK: - Main Launch View
     
     var mainLaunchView: some View {
         VStack(spacing: 40) {
+            // Top bar: info + settings
+            HStack {
+                Button(action: { showAbout = true }) {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.secondary)
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .accessibilityLabel("About MindAnchor")
+                
+                Spacer()
+                
+                Button(action: { showSettings = true }) {
+                    Image(systemName: "gearshape.fill")
+                        .foregroundColor(.secondary)
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
+                .accessibilityLabel("Settings")
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 12)
+            
             Spacer()
             
             // Main Interaction Area
             ZStack {
-                // Pulsing Background (Subtle)
-                // Respect Reduced Motion
                 if !reduceMotion {
                     Circle()
                         .fill(.ultraThinMaterial)
@@ -76,8 +133,7 @@ struct LaunchView: View {
                         .animation(.easeInOut(duration: 4).repeatForever(autoreverses: true), value: pulse)
                         .onAppear { pulse = true }
                 } else {
-                    // Static fallback
-                     Circle()
+                    Circle()
                         .fill(.ultraThinMaterial)
                         .frame(width: 250, height: 250)
                         .opacity(0.4)
@@ -85,7 +141,7 @@ struct LaunchView: View {
                 
                 if let ns = namespace {
                     Circle()
-                        .fill(.regularMaterial) // Glass effect
+                        .fill(.regularMaterial)
                         .frame(width: 200, height: 200)
                         .shadow(radius: 10)
                         .matchedGeometryEffect(id: "captureBackground", in: ns)
@@ -97,10 +153,7 @@ struct LaunchView: View {
                 }
                 
                 VStack(spacing: 16) {
-                    // Use standard font styles for dynamic type support where possible
                     TypewriterText(text: "What's on your mind?", font: .headline, color: .primary)
-                    
-                    // The Plus Icon is strictly visual within the tappable area
                     Image(systemName: "plus")
                         .font(.system(size: 40, weight: .light))
                         .foregroundColor(.primary)
@@ -108,28 +161,17 @@ struct LaunchView: View {
                         .accessibilityHidden(true)
                 }
             }
-            .contentShape(Circle()) // Make the whole area tappable
+            .contentShape(Circle())
             .onTapGesture {
                 HapticManager.shared.playImpact(style: .medium)
                 onStartCapture()
             }
+            .accessibilityLabel("Set a new focus anchor")
+            .accessibilityAddTraits(.isButton)
             
             Spacer()
             
-            Spacer()
-            
-            Button(action: { showAbout = true }) {
-                Image(systemName: "info.circle")
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .background(.ultraThinMaterial)
-                    .clipShape(Circle())
-            }
-            .sheet(isPresented: $showAbout) {
-                AboutView()
-            }
-            
-            // History Button
+            // Bottom Buttons
             HStack(spacing: 20) {
                 NavigationLink(destination: IntentArchiveView()) {
                     VStack {
@@ -159,9 +201,14 @@ struct LaunchView: View {
                     .cornerRadius(20)
                 }
             }
-            .padding(.bottom, 20)
+            .padding(.bottom, 28)
         }
-        .padding()
         .transition(.opacity)
+        .sheet(isPresented: $showAbout) {
+            AboutView()
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
     }
 }

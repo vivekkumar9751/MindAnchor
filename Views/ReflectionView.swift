@@ -3,8 +3,12 @@ import SwiftUI
 struct ReflectionView: View {
     @EnvironmentObject var intentManager: IntentManager
     @State private var reflectionText: String = ""
-    
     @State private var showConfetti = true
+    @AppStorage("focusPhilosophy") private var philosophyRaw: String = AnchorPhilosophy.undecided.rawValue
+    
+    private var philosophy: AnchorPhilosophy {
+        AnchorPhilosophy(rawValue: philosophyRaw) ?? .undecided
+    }
     
     let emotions = ["Satisfied", "Relieved", "Drained", "Proud", "Neutral"]
     
@@ -13,18 +17,30 @@ struct ReflectionView: View {
             VStack(spacing: 30) {
                 Spacer()
                 
-                Text("Session Complete")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-                
-                Text("How do you feel?")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.center)
+                // Philosophy-aware header
+                VStack(spacing: 8) {
+                    Text("Session Complete")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    // Microcopy driven by philosophy
+                    Text(philosophy.completionMessage)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(philosophy.accentColor)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    
+                    Text("How do you feel?")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
                 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 12) {
                     ForEach(emotions, id: \.self) { emotion in
-                        ReflectionButton(title: emotion) { finish(emotion: emotion) }
+                        ReflectionButton(title: emotion, accentColor: philosophy.accentColor) {
+                            finish(emotion: emotion)
+                        }
                     }
                 }
                 .padding(.horizontal)
@@ -40,7 +56,8 @@ struct ReflectionView: View {
                 
                 Spacer()
                 
-                Text("You protected your focus today.")
+                // Philosophy-aware bottom tag
+                Text(philosophy.narrativeTone)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .italic()
@@ -49,7 +66,7 @@ struct ReflectionView: View {
             
             if showConfetti {
                 ConfettiView()
-                    .allowsHitTesting(false) // Let user click buttons underneath
+                    .allowsHitTesting(false)
                     .onAppear {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                             withAnimation {
@@ -70,6 +87,7 @@ struct ReflectionView: View {
 
 struct ReflectionButton: View {
     let title: String
+    var accentColor: Color = .primary
     let action: () -> Void
     
     var body: some View {

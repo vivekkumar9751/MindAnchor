@@ -1,11 +1,15 @@
 import Foundation
 import SwiftUI
 import CoreData
+import ActivityKit
+import WidgetKit
 
+@MainActor
 class IntentManager: ObservableObject {
     @Published var currentIntent: Intent? {
         didSet {
             save()
+            updateActivity()
         }
     }
     
@@ -13,6 +17,9 @@ class IntentManager: ObservableObject {
     @Published var justPaused: Bool = false
     
     @Published var history: [Intent] = []
+    
+    // Live Activity
+    private var currentActivity: Activity<FocusActivityAttributes>?
     
     // Core Data Context
     private let context = PersistenceController.shared.container.viewContext
@@ -105,6 +112,89 @@ class IntentManager: ObservableObject {
         self.currentIntent = intent
     }
 
+    // MARK: - Live Activity Management
+    
+    private func updateActivity() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        
+        if let intent = currentIntent, intent.status == .active {
+            // Active intent: Start or Update
+            if currentActivity == nil {
+                startActivity(intent: intent)
+            } else {
+                updateRunningActivity(intent: intent)
+            }
+        } else {
+            // No active intent (paused or completed): End
+            endActivity()
+        }
+    }
+    
+    private func startActivity(intent: Intent) {
+        let duration = intent.estimatedDuration ?? 1800
+        let targetDate = intent.createdAt.addingTimeInterval(duration)
+        
+        let attributes = FocusActivityAttributes(
+            intentText: intent.text,
+            intentWhy: intent.why,
+            targetDate: targetDate
+        )
+        
+        let contentState = FocusActivityAttributes.ContentState(
+            remainingTime: duration,
+            progress: 0.0,
+            isFocusMode: true
+        )
+        
+        let content = ActivityContent(state: contentState, staleDate: nil)
+        
+        do {
+            currentActivity = try Activity.request(
+                attributes: attributes,
+                content: content,
+                pushType: nil
+            )
+        } catch {
+            print("Error starting Live Activity: \(error)")
+        }
+    }
+    
+    private func updateRunningActivity(intent: Intent) {
+        Task {
+            guard let activity = currentActivity else { return }
+            
+            let duration = intent.estimatedDuration ?? 1800
+            let elapsed = Date().timeIntervalSince(intent.createdAt)
+            let progress = max(0, min(1, elapsed / duration))
+            
+            let updatedState = FocusActivityAttributes.ContentState(
+                remainingTime: max(0, duration - elapsed),
+                progress: progress,
+                isFocusMode: true // We could bind this to actual Focus Mode state if we had it
+            )
+            
+            let content = ActivityContent(state: updatedState, staleDate: nil)
+            await activity.update(content)
+        }
+    }
+    
+    private func endActivity() {
+        Task {
+            guard let activity = currentActivity else { return }
+            
+            // Final state check
+            let finalState = FocusActivityAttributes.ContentState(
+                remainingTime: 0,
+                progress: 1.0,
+                isFocusMode: false
+            )
+             let content = ActivityContent(state: finalState, staleDate: nil)
+            
+            await activity.end(content, dismissalPolicy: .immediate)
+            self.currentActivity = nil
+        }
+    }
+    
     // MARK: - Persistence
     
     private func save() {
@@ -146,6 +236,9 @@ class IntentManager: ObservableObject {
             
             try context.save()
             
+            // Reload widget timeline
+            WidgetCenter.shared.reloadAllTimelines()
+            
         } catch {
             print("Error saving intent: \(error)")
         }
@@ -160,6 +253,9 @@ class IntentManager: ObservableObject {
             if let existing = results.first {
                 context.delete(existing)
                 try context.save()
+                
+                // Reload widget timeline
+                WidgetCenter.shared.reloadAllTimelines()
             }
         } catch {
             print("Error deleting intent: \(error)")
