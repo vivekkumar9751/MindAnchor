@@ -8,6 +8,9 @@ struct AnchorView: View {
     @State private var showInterruption = false
     @State private var vigilant = true
     @State private var breathing = false
+    @State private var overtimeHapticTimer: Timer? = nil
+    @State private var isInOvertime = false
+    @AppStorage("hapticFeedback") private var hapticFeedback: Bool = true
     @AppStorage("focusPhilosophy") private var philosophyRaw: String = AnchorPhilosophy.undecided.rawValue
     
     private var philosophy: AnchorPhilosophy {
@@ -16,8 +19,27 @@ struct AnchorView: View {
     
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1.0)) { context in
+            let currentProgress = Double(progress(at: context.date))
+            
             VStack(spacing: 24) {
                 Spacer()
+                
+                // Overtime banner
+                if currentProgress >= 1.0 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "timer.circle.fill")
+                            .foregroundColor(.white)
+                        Text("Session complete — tap the button below!")
+                            .font(.footnote)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Color.red.opacity(0.85))
+                    .cornerRadius(12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 
                 // Thought Card (Compact)
                 VStack(spacing: 12) {
@@ -45,11 +67,10 @@ struct AnchorView: View {
                 
                 // Focus Timer Visualization
                 ZStack {
-                    // Philosophy-specific ambient animation
                     PhilosophyVisualizationView(
                         style: philosophy.visualizationStyle,
-                        accentColor: philosophy.accentColor,
-                        progress: Double(progress(at: context.date))
+                        accentColor: currentProgress >= 1.0 ? .red : philosophy.accentColor,
+                        progress: currentProgress
                     )
                     .frame(width: 220, height: 220)
                     .accessibilityHidden(true)
@@ -57,20 +78,21 @@ struct AnchorView: View {
                     Circle()
                         .stroke(lineWidth: 15)
                         .opacity(0.1)
-                        .foregroundColor(philosophy.accentColor)
+                        .foregroundColor(currentProgress >= 1.0 ? .red : philosophy.accentColor)
                     
                     Circle()
-                        .trim(from: 0.0, to: progress(at: context.date))
+                        .trim(from: 0.0, to: CGFloat(min(currentProgress, 1.0)))
                         .stroke(style: StrokeStyle(lineWidth: 15, lineCap: .round, lineJoin: .round))
-                        .foregroundColor(progress(at: context.date) > 1.0 ? .red : philosophy.accentColor)
+                        .foregroundColor(currentProgress >= 1.0 ? .red : philosophy.accentColor)
                         .rotationEffect(Angle(degrees: 270.0))
-                        .animation(.linear, value: progress(at: context.date))
+                        .animation(.linear, value: currentProgress)
                     
                     VStack {
                         Text(timerString(at: context.date))
                             .font(.system(size: 40, weight: .bold, design: .monospaced))
+                            .foregroundColor(currentProgress >= 1.0 ? .red : .primary)
                             .accessibilityLabel("Time remaining: \(timerString(at: context.date))")
-                        Text(progress(at: context.date) > 1.0 ? "Overtime" : "Remaining")
+                        Text(currentProgress >= 1.0 ? "Overtime" : "Remaining")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .accessibilityHidden(true)
@@ -106,7 +128,6 @@ struct AnchorView: View {
                         .cornerRadius(8)
                     }
                     .accessibilityLabel(soundManager.isPlaying ? "Mute Sound" : "Play Sound")
-                    .accessibilityValue(soundManager.isPlaying ? "Playing \(soundManager.selectedSound)" : "Silent")
                 }
                 .padding(.horizontal, 40)
                 
@@ -129,12 +150,12 @@ struct AnchorView: View {
                         .cornerRadius(12)
                     }
                     .accessibilityLabel("Interrupt Session")
-                    .accessibilityHint("Pause to log a distraction or handle functionality.")
                     .sheet(isPresented: $showInterruption) {
                         InterruptionView()
                     }
                     
                     HoldToCompleteButton(onComplete: {
+                        stopOvertimeHaptics()
                         withAnimation {
                             intentManager.markDone()
                         }
@@ -144,10 +165,54 @@ struct AnchorView: View {
                 .padding(.bottom, 10)
             }
             .padding()
+            // Watch for overtime crossing
+            .onChange(of: currentProgress >= 1.0) { nowOvertime in
+                if nowOvertime && !isInOvertime {
+                    isInOvertime = true
+                    startOvertimeHaptics()
+                }
+            }
+        }
+        .onDisappear {
+            stopOvertimeHaptics()
         }
     }
     
-    // Timer Helpers
+    // MARK: - Overtime Haptics
+    
+    private func startOvertimeHaptics() {
+        guard hapticFeedback else { return }
+        // Fire immediately on crossing
+        triggerOvertimeHaptic()
+        // Then repeat every 8 seconds until user acts
+        overtimeHapticTimer = Timer.scheduledTimer(withTimeInterval: 8.0, repeats: true) { _ in
+            triggerOvertimeHaptic()
+        }
+    }
+    
+    private func triggerOvertimeHaptic() {
+        guard hapticFeedback else { return }
+        // Triple notification haptic — distinct from regular interaction haptics
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+        generator.notificationOccurred(.warning)
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            generator.notificationOccurred(.warning)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            generator.notificationOccurred(.success)
+        }
+    }
+    
+    private func stopOvertimeHaptics() {
+        overtimeHapticTimer?.invalidate()
+        overtimeHapticTimer = nil
+        isInOvertime = false
+    }
+    
+    // MARK: - Timer Helpers
+    
     func progress(at date: Date) -> CGFloat {
         guard let duration = intent.estimatedDuration, duration > 0 else { return 0 }
         let elapsed = date.timeIntervalSince(intent.createdAt)
@@ -157,7 +222,15 @@ struct AnchorView: View {
     func timerString(at date: Date) -> String {
         let elapsed = date.timeIntervalSince(intent.createdAt)
         let duration = intent.estimatedDuration ?? 1800
-        let remaining = max(0, duration - elapsed)
+        let remaining = duration - elapsed
+        
+        if remaining <= 0 {
+            // Show overtime duration
+            let overtime = Int(-remaining)
+            let m = overtime / 60
+            let s = overtime % 60
+            return "+\(String(format: "%02d:%02d", m, s))"
+        }
         
         let minutes = Int(remaining) / 60
         let seconds = Int(remaining) % 60
