@@ -10,7 +10,7 @@ import AppleProductTypes
 let package = Package(
     name: "MindAnchor",
     platforms: [
-        .iOS("16.0")
+        .iOS("16.2")
     ],
     products: [
         .iOSApplication(
@@ -36,7 +36,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AppModule",
-            path: "."
+            path: ".",
+            resources: [
+                .process("Rain.mp3")
+            ]
         )
     ],
     swiftLanguageVersions: [.version("6")]

@@ -2,9 +2,11 @@ import SwiftUI
 
 struct LaunchView: View {
     var onStartCapture: () -> Void
+    var namespace: Namespace.ID?
     @State private var showAbout = false
     @AppStorage("focusPhilosophy") private var focusPhilosophy: String = "Mindful"
     @AppStorage("hasOnboarded") private var hasOnboarded: Bool = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     @State private var pulse: Bool = false
     
     let philosophies = ["Mindful", "Deep Work", "Flow"]
@@ -12,7 +14,7 @@ struct LaunchView: View {
     var body: some View {
         ZStack {
             // Background ambient layer
-            Color(UIColor.systemBackground)
+            FluidGradientView()
                 .ignoresSafeArea()
             
             if !hasOnboarded {
@@ -47,7 +49,7 @@ struct LaunchView: View {
                         .fontWeight(.medium)
                         .padding()
                         .frame(maxWidth: .infinity)
-                        .background(Color(UIColor.secondarySystemBackground))
+                        .background(.ultraThinMaterial)
                         .cornerRadius(12)
                 }
             }
@@ -61,58 +63,103 @@ struct LaunchView: View {
         VStack(spacing: 40) {
             Spacer()
             
+            // Main Interaction Area
             ZStack {
-                Circle()
-                    .fill(Color.blue.opacity(0.1))
-                    .frame(width: 200, height: 200)
-                    .scaleEffect(pulse ? 1.2 : 1.0)
-                    .opacity(pulse ? 0.8 : 0.4)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
-                            pulse = true
-                        }
-                    }
+                // Pulsing Background (Subtle)
+                // Respect Reduced Motion
+                if !reduceMotion {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 250, height: 250)
+                        .scaleEffect(pulse ? 1.1 : 1.0)
+                        .opacity(pulse ? 0.5 : 0.3)
+                        .animation(.easeInOut(duration: 4).repeatForever(autoreverses: true), value: pulse)
+                        .onAppear { pulse = true }
+                } else {
+                    // Static fallback
+                     Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 250, height: 250)
+                        .opacity(0.4)
+                }
+                
+                if let ns = namespace {
+                    Circle()
+                        .fill(.regularMaterial) // Glass effect
+                        .frame(width: 200, height: 200)
+                        .shadow(radius: 10)
+                        .matchedGeometryEffect(id: "captureBackground", in: ns)
+                } else {
+                    Circle()
+                        .fill(.regularMaterial)
+                        .frame(width: 200, height: 200)
+                        .shadow(radius: 10)
+                }
                 
                 VStack(spacing: 16) {
-                    Text("Hello, \(focusPhilosophy) Soul.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
-                        .kerning(2)
+                    // Use standard font styles for dynamic type support where possible
+                    TypewriterText(text: "What's on your mind?", font: .headline, color: .primary)
                     
-                    Text("What’s on your mind?")
-                        .font(.title2)
-                        .fontWeight(.medium)
-                        .multilineTextAlignment(.center)
+                    // The Plus Icon is strictly visual within the tappable area
+                    Image(systemName: "plus")
+                        .font(.system(size: 40, weight: .light))
+                        .foregroundColor(.primary)
+                        .opacity(0.7)
+                        .accessibilityHidden(true)
                 }
+            }
+            .contentShape(Circle()) // Make the whole area tappable
+            .onTapGesture {
+                HapticManager.shared.playImpact(style: .medium)
+                onStartCapture()
             }
             
-            Button(action: onStartCapture) {
-                HStack {
-                    Image(systemName: "plus")
-                    Text("Anchor a Thought")
-                }
-                .font(.headline)
-                .foregroundColor(.white)
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color.blue)
-                .cornerRadius(12)
-                .shadow(color: Color.blue.opacity(0.3), radius: 5, x: 0, y: 5)
-            }
-            .padding(.horizontal, 40)
-            .padding(.top, 20)
+            Spacer()
             
             Spacer()
             
             Button(action: { showAbout = true }) {
                 Image(systemName: "info.circle")
-                    .foregroundColor(.gray)
+                    .foregroundColor(.secondary)
                     .padding()
+                    .background(.ultraThinMaterial)
+                    .clipShape(Circle())
             }
             .sheet(isPresented: $showAbout) {
                 AboutView()
             }
+            
+            // History Button
+            HStack(spacing: 20) {
+                NavigationLink(destination: IntentArchiveView()) {
+                    VStack {
+                        Image(systemName: "chart.bar.doc.horizontal")
+                            .font(.title2)
+                        Text("Journey")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(.primary)
+                    .padding()
+                    .frame(width: 100)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(20)
+                }
+                
+                NavigationLink(destination: WidgetSimulatorView()) {
+                    VStack {
+                        Image(systemName: "square.dashed.inset.filled")
+                            .font(.title2)
+                        Text("Widgets")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(.primary)
+                    .padding()
+                    .frame(width: 100)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(20)
+                }
+            }
+            .padding(.bottom, 20)
         }
         .padding()
         .transition(.opacity)

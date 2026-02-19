@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CoreData
 
 class IntentManager: ObservableObject {
     @Published var currentIntent: Intent? {
@@ -13,8 +14,8 @@ class IntentManager: ObservableObject {
     
     @Published var history: [Intent] = []
     
-    private let key = "saved_intent"
-    private let historyKey = "intent_history"
+    // Core Data Context
+    private let context = PersistenceController.shared.container.viewContext
     
     init() {
         load()
@@ -41,12 +42,25 @@ class IntentManager: ObservableObject {
         // We could add reflection text to intent if we had a field, 
         // but for now we just save the emotion.
         
-        // Add to history
+        // Add to history (local state)
         history.append(intent)
-        saveHistory()
         
-        // Clear current
-        clearIntent()
+        // Clear current (local state)
+        // The `didSet` on currentIntent will trigger `save()`, which handles the Core Data update/save.
+        // But we need to be careful: if we set currentIntent = nil, `save()` might delete the entity if we logic it that way, 
+        // OR `save()` might just ignore nil. 
+        // Actually, `save()` captures the *value* of currentIntent. 
+        // If currentIntent is nil, we assume the user has no active intent.
+        // But the *completed* intent must be persisted as history.
+        // So we should explicitely save the completed intent to Core Data BEFORE clearing currentIntent.
+        
+        saveEntity(intent) // Ensure the completed state is saved
+        
+        self.currentIntent = nil
+        self.justPaused = false
+        
+        // Reload history from Core Data to be sure
+        loadHistory()
     }
     
     func pauseIntent() {
@@ -67,8 +81,11 @@ class IntentManager: ObservableObject {
     }
     
     func clearIntent() {
+        // This is usually called for "Cancel" or "Delete"
+        if let intent = currentIntent {
+            deleteEntity(intent)
+        }
         self.currentIntent = nil
-        UserDefaults.standard.removeObject(forKey: key)
         self.justPaused = false
     }
     
@@ -91,26 +108,111 @@ class IntentManager: ObservableObject {
     // MARK: - Persistence
     
     private func save() {
-        if let intent = currentIntent, let data = try? JSONEncoder().encode(intent) {
-            UserDefaults.standard.set(data, forKey: key)
-        } else if currentIntent == nil {
-            UserDefaults.standard.removeObject(forKey: key)
+        guard let intent = currentIntent else { return }
+        saveEntity(intent)
+    }
+    
+    private func saveEntity(_ intent: Intent) {
+        let request: NSFetchRequest<IntentEntity> = NSFetchRequest(entityName: "IntentEntity")
+        request.predicate = NSPredicate(format: "id == %@", intent.id as CVarArg)
+        
+        do {
+            let results = try context.fetch(request)
+            let entity: IntentEntity
+            
+            if let existing = results.first {
+                entity = existing
+            } else {
+                entity = IntentEntity(context: context)
+                entity.id = intent.id
+                entity.createdAt = intent.createdAt
+            }
+            
+            // Update properties
+            entity.text = intent.text
+            entity.why = intent.why
+            entity.status = intent.status.rawValue
+            entity.pausedAt = intent.pausedAt
+            entity.emotionalContext = intent.emotionalContext
+            entity.estimatedDuration = intent.estimatedDuration ?? 0
+            entity.completionEmotion = intent.completionEmotion
+            
+            // Serialize distractions
+            if !intent.distractions.isEmpty {
+                 entity.distractionsRaw = intent.distractions.joined(separator: "|||")
+            } else {
+                 entity.distractionsRaw = nil
+            }
+            
+            try context.save()
+            
+        } catch {
+            print("Error saving intent: \(error)")
         }
     }
     
-    private func saveHistory() {
-        if let data = try? JSONEncoder().encode(history) {
-            UserDefaults.standard.set(data, forKey: historyKey)
+    private func deleteEntity(_ intent: Intent) {
+        let request: NSFetchRequest<IntentEntity> = NSFetchRequest(entityName: "IntentEntity")
+        request.predicate = NSPredicate(format: "id == %@", intent.id as CVarArg)
+        
+        do {
+            let results = try context.fetch(request)
+            if let existing = results.first {
+                context.delete(existing)
+                try context.save()
+            }
+        } catch {
+            print("Error deleting intent: \(error)")
         }
     }
     
     private func load() {
-        if let data = UserDefaults.standard.data(forKey: key),
-           let intent = try? JSONDecoder().decode(Intent.self, from: data) {
-            // Only load if it's not completed (though completed ones shouldn't be saved as current usually)
-            if intent.status != .completed {
-                self.currentIntent = intent
+        // Load active or paused intent
+        let request: NSFetchRequest<IntentEntity> = NSFetchRequest(entityName: "IntentEntity")
+        request.predicate = NSPredicate(format: "status != %@", IntentStatus.completed.rawValue)
+        
+        do {
+            let results = try context.fetch(request)
+            if let entity = results.first {
+                self.currentIntent = mapToStruct(entity)
             }
+        } catch {
+            print("Error loading current intent: \(error)")
         }
+        
+        loadHistory()
+    }
+    
+    private func loadHistory() {
+        let request: NSFetchRequest<IntentEntity> = NSFetchRequest(entityName: "IntentEntity")
+        request.predicate = NSPredicate(format: "status == %@", IntentStatus.completed.rawValue)
+        request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+        
+        do {
+            let results = try context.fetch(request)
+            self.history = results.map { mapToStruct($0) }
+        } catch {
+            print("Error loading history: \(error)")
+        }
+    }
+    
+    private func mapToStruct(_ entity: IntentEntity) -> Intent {
+        var distractions: [String] = []
+        if let raw = entity.distractionsRaw {
+            distractions = raw.components(separatedBy: "|||")
+        }
+        
+        return Intent(
+            id: entity.id,
+            text: entity.text,
+            why: entity.why,
+            status: IntentStatus(rawValue: entity.status) ?? .active,
+            createdAt: entity.createdAt,
+            pausedAt: entity.pausedAt,
+            emotionalContext: entity.emotionalContext,
+            estimatedDuration: entity.estimatedDuration,
+            distractions: distractions,
+            completionEmotion: entity.completionEmotion
+        )
     }
 }

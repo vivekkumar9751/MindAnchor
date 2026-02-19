@@ -2,10 +2,12 @@ import SwiftUI
 
 struct AnchorView: View {
     @EnvironmentObject var intentManager: IntentManager
+    @EnvironmentObject var soundManager: SoundManager
     let intent: Intent
     
     @State private var showInterruption = false
     @State private var vigilant = true // Simulated Focus Mode state
+    @State private var breathing = false
     
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1.0)) { context in
@@ -32,12 +34,23 @@ struct AnchorView: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity)
-                .background(Color(UIColor.secondarySystemBackground))
+                .background(.regularMaterial)
                 .cornerRadius(16)
                 .shadow(radius: 3)
                 
                 // Focus Timer Visualization
                 ZStack {
+                    // Breathing Background
+                    if vigilant {
+                        Circle()
+                            .fill(Color.blue.opacity(0.1))
+                            .scaleEffect(breathing ? 1.1 : 0.9)
+                            .opacity(breathing ? 0.6 : 0.2)
+                            .animation(.easeInOut(duration: 4).repeatForever(autoreverses: true), value: breathing)
+                            .onAppear { breathing = true }
+                            .accessibilityHidden(true) // Decorative
+                    }
+                    
                     Circle()
                         .stroke(lineWidth: 15)
                         .opacity(0.1)
@@ -53,20 +66,46 @@ struct AnchorView: View {
                     VStack {
                         Text(timerString(at: context.date))
                             .font(.system(size: 40, weight: .bold, design: .monospaced))
+                            .accessibilityLabel("Time remaining: \(timerString(at: context.date))")
                         Text(progress(at: context.date) > 1.0 ? "Overtime" : "Remaining")
                             .font(.caption)
                             .foregroundColor(.secondary)
+                            .accessibilityHidden(true)
                     }
                 }
                 .frame(width: 200, height: 200)
                 .padding(.vertical)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Focus Timer. \(timerString(at: context.date)) remaining.")
                 
-                // Focus Mode Toggle (Visual)
-                Toggle("Focus Mode Active", isOn: $vigilant)
-                    .padding()
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .cornerRadius(10)
-                    .padding(.horizontal)
+                // Focus Mode & Ambient Controls
+                HStack {
+                    Toggle("Focus Mode", isOn: $vigilant)
+                        .labelsHidden()
+                        .accessibilityLabel("Toggle Focus Mode")
+                        .accessibilityHint("Enables visual breathing guide.")
+                    Text("Focus Mode")
+                        .font(.caption)
+                        .accessibilityHidden(true)
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        soundManager.toggleSound()
+                    }) {
+                        HStack {
+                            Image(systemName: soundManager.isPlaying ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                            Text(soundManager.isPlaying ? soundManager.selectedSound : "Silent")
+                        }
+                        .font(.caption)
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(8)
+                    }
+                    .accessibilityLabel(soundManager.isPlaying ? "Mute Sound" : "Play Sound")
+                    .accessibilityValue(soundManager.isPlaying ? "Playing \(soundManager.selectedSound)" : "Silent")
+                }
+                .padding(.horizontal, 40)
                 
                 Spacer()
                 
@@ -86,28 +125,17 @@ struct AnchorView: View {
                         .foregroundColor(.orange)
                         .cornerRadius(12)
                     }
+                    .accessibilityLabel("Interrupt Session")
+                    .accessibilityHint("Pause to log a distraction or handle functionality.")
                     .sheet(isPresented: $showInterruption) {
                         InterruptionView()
                     }
                     
-                    Button(action: {
+                    HoldToCompleteButton(onComplete: {
                         withAnimation {
                             intentManager.markDone()
                         }
-                    }) {
-                        VStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.title)
-                            Text("Complete")
-                                .font(.caption2)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                        .shadow(radius: 3)
-                    }
+                    })
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 10)

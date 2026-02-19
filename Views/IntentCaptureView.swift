@@ -2,6 +2,8 @@ import SwiftUI
 
 struct IntentCaptureView: View {
     @Binding var navigationPath: NavigationPath
+    var namespace: Namespace.ID?
+    
     @State private var intentText: String = ""
     @State private var whyText: String = ""
     @State private var emotionalContext: String = ""
@@ -10,7 +12,15 @@ struct IntentCaptureView: View {
     let durations = [15, 30, 45, 60, 90, 120]
     
     var body: some View {
-        Form {
+        ZStack {
+            if let ns = namespace {
+                Rectangle()
+                    .fill(Color(UIColor.systemGroupedBackground)) // Match form background
+                    .matchedGeometryEffect(id: "captureBackground", in: ns)
+                    .ignoresSafeArea()
+            }
+            
+            Form {
             Section(header: Text("Inception")) {
                 TextField("What are you doing?", text: $intentText)
                 TextField("Why? (Logical reason)", text: $whyText)
@@ -42,7 +52,9 @@ struct IntentCaptureView: View {
                 .disabled(!isFormValid)
             }
         }
+        }
         .navigationTitle("New Anchor")
+        .scrollContentBackground(.hidden) // Important for ZStack background to show
     }
     
     var isFormValid: Bool {
